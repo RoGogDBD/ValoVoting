@@ -23,6 +23,7 @@ const githubRepo = "kudryavtsevmakar/valovoting"
 // Skips silently when currentVersion == "dev" (local builds).
 func Check(currentVersion string) {
 	if currentVersion == "dev" {
+		fmt.Printf("  %s[dev build — проверка обновлений пропущена]%s\n", dimCode, resetCode)
 		return
 	}
 
@@ -86,6 +87,7 @@ const (
 
 type release struct {
 	TagName string  `json:"tag_name"`
+	Draft   bool    `json:"draft"`
 	Assets  []asset `json:"assets"`
 }
 
@@ -96,10 +98,13 @@ type asset struct {
 
 func fetchLatest() (*release, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
-	url := "https://api.github.com/repos/" + githubRepo + "/releases/latest"
+	// Use the list endpoint — /releases/latest skips prereleases and returns
+	// 404 if only prerelease tags exist, causing missed updates.
+	url := "https://api.github.com/repos/" + githubRepo + "/releases?per_page=10"
 
 	req, _ := http.NewRequest(http.MethodGet, url, nil)
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", "valovoting-updater")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -107,18 +112,27 @@ func fetchLatest() (*release, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 403 {
+		return nil, fmt.Errorf("GitHub rate limit превышен — попробуйте позже")
+	}
 	if resp.StatusCode == 404 {
-		return nil, fmt.Errorf("релизов пока нет")
+		return nil, fmt.Errorf("репозиторий не найден")
 	}
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("GitHub API: HTTP %d", resp.StatusCode)
 	}
 
-	var r release
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+	var releases []release
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
 		return nil, fmt.Errorf("парсинг ответа: %w", err)
 	}
-	return &r, nil
+	// Pick the first non-draft release (prereleases are fine for auto-update)
+	for i := range releases {
+		if !releases[i].Draft {
+			return &releases[i], nil
+		}
+	}
+	return nil, fmt.Errorf("релизов пока нет")
 }
 
 func pickAsset(assets []asset) (url, name string) {
