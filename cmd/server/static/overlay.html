@@ -364,6 +364,7 @@
   let mapImages      = {};   // displayName.toLowerCase() → image URL
   let choiceNodes    = {};   // choiceId → DOM node
   let choiceRanks    = {};   // choiceId → last rendered rank index
+  let clockOffset    = 0;    // ms — how far server time is ahead of Date.now()
   let timerInterval  = null;
   let exitTimeout    = null;
   let winnerTimeout  = null;
@@ -412,6 +413,10 @@
 
   /* ── Render ── */
   function render(state) {
+    // Compute clock offset once per message: positive = server is ahead of local clock.
+    if (state.server_time) {
+      clockOffset = new Date(state.server_time).getTime() - Date.now();
+    }
     if (state.phase === 'idle' || !state.poll_id) {
       hide();
       stopTimer();
@@ -574,7 +579,9 @@
     const end = new Date(endsAtStr).getTime();
 
     function tick() {
-      const rem = Math.max(0, Math.floor((end - Date.now()) / 1000));
+      // Subtract clockOffset so server-time ends_at is compared against server-time now.
+      // If user's clock is N seconds behind server, clockOffset = +N*1000.
+      const rem = Math.max(0, Math.floor((end - Date.now() - clockOffset) / 1000));
       timerEl.textContent = `${pad(Math.floor(rem / 60))}:${pad(rem % 60)}`;
       timerEl.classList.toggle('ending', rem <= 10);
       if (rem === 0) stopTimer();

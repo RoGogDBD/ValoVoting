@@ -197,6 +197,7 @@ func (c *EventSubClient) buildState(ev *PollEvent, subType string) poll.State {
 		DurationSeconds: int(endsAt.Sub(ev.StartedAt).Seconds()),
 		StartedAt:       ev.StartedAt,
 		EndsAt:          endsAt,
+		ServerNow:       time.Now(),
 		Winner:          winner,
 	}
 }
