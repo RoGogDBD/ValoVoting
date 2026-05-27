@@ -2,9 +2,11 @@ package setup
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -71,45 +73,37 @@ func PrintBanner() {
 }
 
 // Run executes the interactive setup wizard and writes .env on success.
+// PrintBanner must be called by the caller before Run.
 func Run() error {
-	PrintBanner()
 	fmt.Printf("  Первый запуск %s— давайте войдём в Twitch-аккаунт.%s\n", cDim, cReset)
 
-	// ── Step 1: Twitch login ─────────────────────────────────────────────────
+	// ── Step 1: Twitch OAuth (automatic capture) ─────────────────────────────
 	step(1, 3, "Вход в Twitch")
-
-	authURL := fmt.Sprintf(
-		"https://id.twitch.tv/oauth2/authorize"+
-			"?client_id=%s"+
-			"&redirect_uri=http://localhost:8080"+
-			"&response_type=token"+
-			"&scope=channel%%3Aread%%3Apolls+channel%%3Amanage%%3Apolls+chat%%3Aread",
-		config.TwitchClientID,
-	)
-
-	info("Открываем браузер для авторизации...")
-	openBrowser(authURL)
+	info("Открываем браузер. После входа страница закроется автоматически.")
+	info("Если браузер не открылся — скопируйте ссылку ниже вручную.")
 	fmt.Println()
-	info("Если браузер не открылся, откройте эту ссылку вручную:")
-	fmt.Printf("\n  %s%s%s\n\n", cGreen, authURL, cReset)
-	info("После авторизации вы попадёте на страницу вида:")
-	info("  http://localhost:8080/#access_token=XXXXX&...")
-	info("Скопируйте значение access_token из адресной строки.")
 
-	var token, broadcasterID, channelLogin string
-	for {
+	authURL := buildAuthURL()
+	fmt.Printf("  %s%s%s\n\n", cDim, authURL, cReset)
+
+	fmt.Printf("  %sОжидаем авторизацию в браузере...%s\n", cDim, cReset)
+
+	// Start a temporary local server to capture the OAuth token automatically.
+	// The browser is redirected to http://localhost:8080, our page reads the
+	// #fragment with JS and POSTs the token back to /oauth-token.
+	token, err := captureToken(authURL)
+	if err != nil {
+		// Fallback: let the user paste it manually
+		fmt.Printf("  %sАвтоматический захват не сработал (%v).%s\n", cRed, err, cReset)
+		info("Скопируйте access_token из адресной строки браузера вручную.")
 		token = mustInput("Access Token")
-		id, login, err := fetchUser(token)
-		if err != nil {
-			fail("Не удалось проверить токен: " + err.Error())
-			info("Убедитесь, что токен скопирован полностью, и попробуйте снова.")
-			continue
-		}
-		broadcasterID = id
-		channelLogin = login
-		ok(fmt.Sprintf("Вы вошли как  %s%s%s  (ID: %s)", cBold+cWhite, login, cReset, id))
-		break
 	}
+
+	id, login, err := fetchUser(token)
+	if err != nil {
+		return fmt.Errorf("не удалось проверить токен: %w", err)
+	}
+	ok(fmt.Sprintf("Вы вошли как  %s%s%s  (ID: %s)", cBold+cWhite, login, cReset, id))
 
 	// ── Step 2: Bot options ──────────────────────────────────────────────────
 	step(2, 3, "Настройки бота")
@@ -148,8 +142,8 @@ func Run() error {
 		"TWITCH_BROADCASTER_ID=%s\nTWITCH_ACCESS_TOKEN=%s\n"+
 			"TWITCH_CHANNEL=%s\nCHAT_COMMAND=%s\n"+
 			"DEFAULT_POLL_DURATION=%d\nPORT=%s\n",
-		broadcasterID, token,
-		channelLogin, chatCmd,
+		id, token,
+		login, chatCmd,
 		duration, port,
 	)
 
@@ -177,6 +171,163 @@ func Run() error {
 	fmt.Println()
 
 	return nil
+}
+
+// ── OAuth capture ─────────────────────────────────────────────────────────────
+
+// callbackHTML is served at http://localhost:8080 after the Twitch redirect.
+// JS reads the token from the URL fragment (never sent to the server) and
+// POSTs it to /oauth-token so our Go code can receive it.
+const callbackHTML = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Valorant Poll Overlay</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f0f14;color:#fff;font-family:sans-serif;
+     display:flex;align-items:center;justify-content:center;height:100vh}
+.box{text-align:center}
+.icon{font-size:56px;margin-bottom:16px}
+.title{font-size:22px;font-weight:700;letter-spacing:1px}
+.sub{font-size:14px;color:rgba(255,255,255,.45);margin-top:8px}
+.green{color:#00f0a0}
+</style>
+</head>
+<body>
+<div class="box" id="box">
+  <div class="icon">⏳</div>
+  <div class="title">Авторизация...</div>
+</div>
+<script>
+const p = new URLSearchParams(window.location.hash.slice(1));
+const token = p.get("access_token");
+const box = document.getElementById("box");
+if (token) {
+  fetch("/oauth-token?t=" + encodeURIComponent(token))
+    .then(() => {
+      box.innerHTML =
+        '<div class="icon green">✓</div>' +
+        '<div class="title">Вы вошли в Twitch!</div>' +
+        '<div class="sub">Вернитесь в терминал — настройка продолжается.</div>';
+    })
+    .catch(() => {
+      box.innerHTML = '<div class="icon" style="color:red">✗</div><div class="title">Ошибка отправки токена.</div>';
+    });
+} else {
+  box.innerHTML = '<div class="icon" style="color:red">✗</div><div class="title">Токен не найден.</div><div class="sub">Попробуйте ещё раз.</div>';
+}
+</script>
+</body>
+</html>`
+
+// captureToken starts a temporary HTTP server on :8080, opens the auth URL
+// in the browser, waits for the JS callback with the token, then shuts down.
+func captureToken(authURL string) (string, error) {
+	tokenCh := make(chan string, 1)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, callbackHTML)
+	})
+	mux.HandleFunc("/oauth-token", func(w http.ResponseWriter, r *http.Request) {
+		t := r.URL.Query().Get("t")
+		w.WriteHeader(http.StatusOK)
+		if t != "" {
+			select {
+			case tokenCh <- t:
+			default:
+			}
+		}
+	})
+
+	srv := &http.Server{Addr: ":8080", Handler: mux}
+	srvErr := make(chan error, 1)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			srvErr <- err
+		}
+	}()
+	// Give the server a moment to bind
+	time.Sleep(100 * time.Millisecond)
+
+	// Open browser via a temp HTML redirect file — avoids & being parsed
+	// by xdg-open / cmd.exe as a shell operator
+	openViaTempFile(authURL)
+
+	select {
+	case token := <-tokenCh:
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+		return token, nil
+	case err := <-srvErr:
+		return "", fmt.Errorf("локальный сервер: %w", err)
+	case <-time.After(5 * time.Minute):
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+		return "", fmt.Errorf("timeout (5 мин)")
+	}
+}
+
+// openViaTempFile writes a tiny HTML redirect page to a temp file and opens
+// that file in the browser. This avoids passing the auth URL (which contains
+// & characters) directly to xdg-open / cmd.exe where & is a shell operator.
+func openViaTempFile(authURL string) {
+	// In HTML, & inside an attribute value must be &amp;
+	htmlSafe := strings.ReplaceAll(authURL, "&", "&amp;")
+	html := fmt.Sprintf(`<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0;url=%s">
+</head><body>Открываем Twitch...</body></html>`, htmlSafe)
+
+	tmp, err := os.CreateTemp("", "valovoting_auth_*.html")
+	if err != nil {
+		// Fallback: try direct open anyway
+		openDirect(authURL)
+		return
+	}
+	tmp.WriteString(html)
+	tmp.Close()
+
+	go func() {
+		time.Sleep(15 * time.Second)
+		os.Remove(tmp.Name())
+	}()
+
+	switch runtime.GOOS {
+	case "windows":
+		exec.Command("cmd", "/c", "start", "", tmp.Name()).Start()
+	case "darwin":
+		exec.Command("open", tmp.Name()).Start()
+	default:
+		exec.Command("xdg-open", tmp.Name()).Start()
+	}
+}
+
+// openDirect is the last-resort fallback for opening URLs directly.
+func openDirect(u string) {
+	switch runtime.GOOS {
+	case "windows":
+		exec.Command("rundll32", "url.dll,FileProtocolHandler", u).Start()
+	case "darwin":
+		exec.Command("open", u).Start()
+	default:
+		exec.Command("xdg-open", u).Start()
+	}
+}
+
+// ── URL builder ───────────────────────────────────────────────────────────────
+
+func buildAuthURL() string {
+	p := url.Values{}
+	p.Set("client_id", config.TwitchClientID)
+	p.Set("redirect_uri", "http://localhost:8080")
+	p.Set("response_type", "token")
+	p.Set("scope", "channel:read:polls channel:manage:polls chat:read")
+	return "https://id.twitch.tv/oauth2/authorize?" + p.Encode()
 }
 
 // ── Layout helpers ───────────────────────────────────────────────────────────
@@ -210,21 +361,6 @@ func inputDefault(label, def string) string {
 		return def
 	}
 	return v
-}
-
-// ── Browser ──────────────────────────────────────────────────────────────────
-
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "", url)
-	case "darwin":
-		cmd = exec.Command("open", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
-	}
-	_ = cmd.Start() // best-effort — user can open manually
 }
 
 // ── Twitch API ────────────────────────────────────────────────────────────────
