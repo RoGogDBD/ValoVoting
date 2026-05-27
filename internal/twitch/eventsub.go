@@ -127,8 +127,8 @@ func (c *EventSubClient) subscribe(sessionID string) error {
 
 func (c *EventSubClient) createSub(sessionID, subType string) error {
 	body := subRequest{
-		Type:    subType,
-		Version: "1",
+		Type:      subType,
+		Version:   "1",
 		Condition: subCondition{BroadcasterUserID: c.cfg.TwitchBroadcasterID},
 		Transport: subTransport{Method: "websocket", SessionID: sessionID},
 	}
@@ -180,9 +180,12 @@ func (c *EventSubClient) buildState(ev *PollEvent, subType string) poll.State {
 	}
 
 	phase := detectPhase(ev.Title)
+
+	// channel.poll.progress does not include ends_at — carry it forward from
+	// the previously stored state so the overlay timer stays in sync.
 	endsAt := ev.EndsAt
-	if endsAt.IsZero() && subType == "channel.poll.begin" {
-		endsAt = ev.StartedAt.Add(time.Duration(60) * time.Second)
+	if endsAt.IsZero() {
+		endsAt = c.pollService.GetState().EndsAt
 	}
 
 	return poll.State{

@@ -363,6 +363,7 @@
   /* ── State ── */
   let mapImages      = {};   // displayName.toLowerCase() → image URL
   let choiceNodes    = {};   // choiceId → DOM node
+  let choiceRanks    = {};   // choiceId → last rendered rank index
   let timerInterval  = null;
   let exitTimeout    = null;
   let winnerTimeout  = null;
@@ -439,8 +440,8 @@
     const maxVotes = choices.reduce((m, c) => Math.max(m, c.votes), 0);
 
     /* Sorted order: most votes first */
-    const sorted   = [...choices].sort((a, b) => b.votes - a.votes);
-    const stride   = ITEM_HEIGHT + ITEM_GAP;
+    const sorted = [...choices].sort((a, b) => b.votes - a.votes);
+    const stride = ITEM_HEIGHT + ITEM_GAP;
 
     totalVotesEl.textContent = `${total} vote${total !== 1 ? 's' : ''}`;
 
@@ -450,15 +451,23 @@
       if (!incoming.has(id)) {
         choiceNodes[id].remove();
         delete choiceNodes[id];
+        delete choiceRanks[id];
       }
     }
 
-    /* Add new nodes */
+    /* Add new nodes — place immediately at correct position (no animation) */
     for (const ch of choices) {
       if (!choiceNodes[ch.id]) {
         const node = buildChoiceNode();
+        const idx  = sorted.findIndex(s => s.id === ch.id);
+        /* Disable transition, set position, force reflow, re-enable */
+        node.style.transition = 'none';
+        node.style.transform  = `translateY(${idx * stride}px)`;
         choicesContainer.appendChild(node);
+        void node.offsetWidth; // flush layout so position is committed
+        node.style.transition = '';
         choiceNodes[ch.id] = node;
+        choiceRanks[ch.id] = idx;
       }
     }
 
@@ -467,13 +476,16 @@
 
     /* Update every node */
     choices.forEach(ch => {
-      const node       = choiceNodes[ch.id];
-      const sortedIdx  = sorted.findIndex(s => s.id === ch.id);
-      const pct        = total > 0 ? ch.votes / total : 0;
-      const isLeading  = ch.votes === maxVotes && maxVotes > 0;
+      const node      = choiceNodes[ch.id];
+      const sortedIdx = sorted.findIndex(s => s.id === ch.id);
+      const pct       = total > 0 ? ch.votes / total : 0;
+      const isLeading = ch.votes === maxVotes && maxVotes > 0;
 
-      /* Position — transition handles the animation */
-      node.style.transform = `translateY(${sortedIdx * stride}px)`;
+      /* Only move when rank changes — prevents interrupting an in-progress animation */
+      if (choiceRanks[ch.id] !== sortedIdx) {
+        choiceRanks[ch.id] = sortedIdx;
+        node.style.transform = `translateY(${sortedIdx * stride}px)`;
+      }
 
       /* Bar width (scaleX for GPU) */
       node.querySelector('.choice-bar').style.transform = `scaleX(${pct})`;
@@ -482,9 +494,9 @@
       node.classList.toggle('leading', isLeading);
 
       /* Text */
-      node.querySelector('.choice-title').textContent  = ch.title;
-      node.querySelector('.choice-votes').textContent  = ch.votes;
-      node.querySelector('.choice-pct').textContent    = Math.round(pct * 100) + '%';
+      node.querySelector('.choice-title').textContent = ch.title;
+      node.querySelector('.choice-votes').textContent = ch.votes;
+      node.querySelector('.choice-pct').textContent   = Math.round(pct * 100) + '%';
 
       /* Map image (set once, avoid flicker) */
       const imgEl  = node.querySelector('.choice-image');
