@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -20,6 +21,9 @@ import (
 	"github.com/kudryavtsevmakar/valovoting/internal/twitch"
 	"github.com/kudryavtsevmakar/valovoting/internal/update"
 )
+
+//go:embed static/overlay.html
+var staticFiles embed.FS
 
 // version is set at build time via -ldflags "-X main.version=vX.Y.Z"
 var version = "dev"
@@ -79,9 +83,13 @@ func main() {
 	r.GET("/api/poll/state", poll.NewHandler(pollService).GetState)
 	r.GET("/ws", h.ServeWS)
 	r.GET("/overlay", func(c *gin.Context) {
-		c.File("static/overlay.html")
+		data, err := staticFiles.ReadFile("static/overlay.html")
+		if err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
 	})
-	r.Static("/static", "./static")
 
 	fmt.Printf("  Оверлей:  http://localhost:%s/overlay\n\n", cfg.Port)
 
