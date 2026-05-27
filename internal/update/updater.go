@@ -189,6 +189,11 @@ func downloadAndReplace(url, exePath string) error {
 		_ = os.Rename(oldPath, exePath) // restore on failure
 		return fmt.Errorf("rename new: %w", err)
 	}
+	// Best-effort: remove .old immediately.
+	// On Linux/macOS this always works; on Windows the running process
+	// holds the file open so Remove fails silently — CleanupOldBinary
+	// at the next launch will handle it.
+	_ = os.Remove(oldPath)
 	return nil
 }
 
@@ -236,6 +241,10 @@ func isNewer(current, latest string) bool {
 
 func parseVer(v string) [3]int {
 	v = strings.TrimPrefix(v, "v")
+	// Strip git-describe suffix like -3-gabcdef or pre-release like -beta.1
+	if i := strings.IndexByte(v, '-'); i >= 0 {
+		v = v[:i]
+	}
 	parts := strings.SplitN(v, ".", 3)
 	var r [3]int
 	for i := 0; i < 3 && i < len(parts); i++ {
