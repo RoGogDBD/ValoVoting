@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-const githubRepo = "kudryavtsevmakar/valovoting"
+const githubRepo = "RoGogDBD/ValoVoting"
 
 // Check compares currentVersion against the latest GitHub release.
 // If a newer version exists, it downloads and atomically replaces the binary,
