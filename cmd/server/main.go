@@ -19,23 +19,13 @@ import (
 	"github.com/kudryavtsevmakar/valovoting/internal/poll"
 	"github.com/kudryavtsevmakar/valovoting/internal/setup"
 	"github.com/kudryavtsevmakar/valovoting/internal/twitch"
-	"github.com/kudryavtsevmakar/valovoting/internal/update"
 )
 
 //go:embed static/overlay.html
 var staticFiles embed.FS
 
-// version is set at build time via -ldflags "-X main.version=vX.Y.Z"
-var version = "dev"
-
 func main() {
 	setup.PrintBanner()
-
-	// Remove leftover .old binary from a previous self-update
-	update.CleanupOldBinary()
-
-	// Check GitHub releases for a newer version (skipped for "dev" builds)
-	update.Check(version)
 
 	// Run interactive wizard if .env is missing or incomplete
 	if setup.IsNeeded() {
