@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Valo Poll Overlay</title>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --green:          #00f0a0;
+    --green-glow:     rgba(0, 240, 160, 0.45);
+    --green-fill:     rgba(0, 240, 160, 0.55);
+    --green-faint:    rgba(0, 240, 160, 0.12);
+    --ease-out-cubic:    cubic-bezier(0.215, 0.61, 0.355, 1);
+    --ease-in-out-cubic: cubic-bezier(0.645, 0.045, 0.355, 1);
+    --dur-enter: 260ms;
+    --dur-exit:  200ms;
+    --dur-bar:   380ms;
+    --dur-sort:  440ms;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: transparent;
+    font-family: 'Rajdhani', sans-serif;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+  }
+
+  /* ── Overlay wrapper ── */
+  #overlay {
+    position: absolute;
+    bottom: 80px;
+    right: 60px;
+    width: 440px;
+    opacity: 0;
+    transform: translateX(16px) scale(0.97);
+    transition:
+      opacity  var(--dur-enter) var(--ease-out-cubic),
+      transform var(--dur-enter) var(--ease-out-cubic);
+    will-change: transform;
+    pointer-events: none;
+  }
+  #overlay.visible { opacity: 1; transform: translateX(0) scale(1); }
+  #overlay.exiting { transition-duration: var(--dur-exit); }
+
+  /* ── Header — floating text, no panel ── */
+  .ov-header { margin-bottom: 14px; }
+
+  .phase-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--green);
+    border: 1px solid var(--green);
+    padding: 2px 9px;
+    margin-bottom: 7px;
+    text-shadow: 0 0 10px var(--green-glow);
+    box-shadow: 0 0 8px var(--green-glow);
+  }
+
+  .poll-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    line-height: 1.2;
+    text-shadow: 0 1px 14px rgba(0,0,0,0.95), 0 0 30px rgba(0,0,0,0.7);
+  }
+
+  /* ── Choices container — position:relative for absolute children ── */
+  .choices {
+    position: relative;
+    /* height driven by JS */
+  }
+
+  /* Each choice is absolute so translateY can animate position */
+  .choice {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 58px;
+    border-radius: 3px;
+    overflow: hidden;
+    will-change: transform;
+    /* on-screen movement → ease-in-out */
+    transition: transform var(--dur-sort) var(--ease-in-out-cubic);
+  }
+
+  /* Map splash art */
+  .choice-image {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center 30%;
+    opacity: 0.45;
+    transition: opacity 300ms ease;
+  }
+  .choice.leading .choice-image { opacity: 0.65; }
+
+  /* Readability scrim — left is darker for text, right fades out */
+  .choice-scrim {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      rgba(0,0,0,0.72) 0%,
+      rgba(0,0,0,0.42) 55%,
+      rgba(0,0,0,0.10) 100%
+    );
+  }
+
+  /* Green vote bar (GPU: scaleX) */
+  .choice-bar {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      var(--green-fill) 0%,
+      var(--green-faint) 70%,
+      transparent 100%
+    );
+    transform: scaleX(0);
+    transform-origin: left;
+    will-change: transform;
+    transition: transform var(--dur-bar) var(--ease-out-cubic);
+  }
+  .choice.leading .choice-bar {
+    background: linear-gradient(
+      90deg,
+      rgba(0,240,160,0.80) 0%,
+      rgba(0,240,160,0.28) 70%,
+      transparent 100%
+    );
+  }
+
+  /* Left accent stripe */
+  .choice-accent {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--green);
+    opacity: 0.5;
+    transition: opacity 200ms ease, box-shadow 200ms ease;
+  }
+  .choice.leading .choice-accent {
+    opacity: 1;
+    box-shadow: 0 0 10px var(--green);
+  }
+
+  /* Text row */
+  .choice-content {
+    position: relative;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 100%;
+    padding: 0 14px 0 14px;
+  }
+
+  .choice-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    text-shadow: 0 1px 8px rgba(0,0,0,0.9);
+  }
+
+  .choice-right {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+  }
+
+  .choice-votes {
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 8px rgba(0,0,0,0.9);
+  }
+
+  .choice-pct {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--green);
+    min-width: 36px;
+    text-align: right;
+    text-shadow: 0 0 8px var(--green-glow);
+  }
+
+  /* ── Footer — floating text ── */
+  .ov-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 12px;
+  }
+
+  .total-votes {
+    font-size: 12px;
+    color: rgba(255,255,255,0.45);
+    letter-spacing: 0.5px;
+    text-shadow: 0 1px 8px rgba(0,0,0,0.9);
+  }
+
+  .timer {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 1px;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 14px var(--green-glow), 0 1px 8px rgba(0,0,0,0.9);
+  }
+
+  .timer.ending { animation: pulse 800ms ease-in-out infinite alternate; }
+
+  @keyframes pulse {
+    from { opacity: 1; }
+    to   { opacity: 0.3; }
+  }
+
+  /* ── Winner panel ── */
+  @keyframes winnerIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  .winner-panel {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    opacity: 0;
+  }
+  .winner-panel.show {
+    display: flex;
+    animation: winnerIn var(--dur-enter) var(--ease-out-cubic) forwards;
+  }
+
+  .winner-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--green);
+    text-shadow: 0 0 12px var(--green-glow);
+    margin-bottom: 4px;
+  }
+
+  .winner-divider {
+    width: 36px;
+    height: 2px;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    margin: 8px auto;
+  }
+
+  .winner-name {
+    font-size: 34px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    text-shadow: 0 1px 14px rgba(0,0,0,0.95);
+    margin-bottom: 10px;
+  }
+
+  /* Winner map image card */
+  .winner-card {
+    width: 100%;
+    height: 76px;
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+    border-left: 3px solid var(--green);
+    box-shadow: 0 0 16px var(--green-glow);
+  }
+
+  .winner-card-image {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center 30%;
+  }
+
+  .winner-card-scrim {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgba(0,0,0,0.45) 0%, transparent 100%);
+  }
+
+  .winner-votes {
+    font-size: 13px;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 1px;
+    margin-top: 8px;
+    text-shadow: 0 1px 8px rgba(0,0,0,0.9);
+  }
+
+  /* ── Accessibility ── */
+  @media (prefers-reduced-motion: reduce) {
+    #overlay, .choice, .choice-bar, .choice-image { transition: none; }
+    .winner-panel.show { animation: none; opacity: 1; }
+    .timer.ending { animation: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="overlay">
+  <!-- Active poll -->
+  <div id="active-section">
+    <div class="ov-header">
+      <div class="phase-badge" id="phase-badge">MAP VOTE</div>
+      <div class="poll-title" id="poll-title"></div>
+    </div>
+    <div class="choices" id="choices-container"></div>
+    <div class="ov-footer">
+      <span class="total-votes" id="total-votes">0 votes</span>
+      <span class="timer" id="timer">--:--</span>
+    </div>
+  </div>
+
+  <!-- Winner -->
+  <div class="winner-panel" id="winner-panel">
+    <div class="winner-label">Winner</div>
+    <div class="winner-divider"></div>
+    <div class="winner-name" id="winner-name">–</div>
+    <div class="winner-card" id="winner-card">
+      <div class="winner-card-image" id="winner-card-image"></div>
+      <div class="winner-card-scrim"></div>
+    </div>
+    <div class="winner-votes" id="winner-votes"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const ITEM_HEIGHT  = 58;  // px — must match CSS .choice height
+  const ITEM_GAP     = 8;   // px — gap between choices
+  const WINNER_DELAY = 30000; // ms before hiding winner
+
+  /* ── DOM refs ── */
+  const overlay          = document.getElementById('overlay');
+  const activeSection    = document.getElementById('active-section');
+  const winnerPanel      = document.getElementById('winner-panel');
+  const phaseBadge       = document.getElementById('phase-badge');
+  const pollTitle        = document.getElementById('poll-title');
+  const choicesContainer = document.getElementById('choices-container');
+  const totalVotesEl     = document.getElementById('total-votes');
+  const timerEl          = document.getElementById('timer');
+  const winnerNameEl     = document.getElementById('winner-name');
+  const winnerCardImage  = document.getElementById('winner-card-image');
+  const winnerVotesEl    = document.getElementById('winner-votes');
+
+  /* ── State ── */
+  let mapImages      = {};   // displayName.toLowerCase() → image URL
+  let choiceNodes    = {};   // choiceId → DOM node
+  let timerInterval  = null;
+  let exitTimeout    = null;
+  let winnerTimeout  = null;
+  let ws             = null;
+  let reconnectDelay = 1000;
+
+  /* ── Map images ── */
+  async function loadMapImages() {
+    try {
+      const res  = await fetch('https://valorant-api.com/v1/maps');
+      const { data } = await res.json();
+      for (const m of data) {
+        const url = m.listViewIcon || m.splash || '';
+        if (url) mapImages[m.displayName.toLowerCase()] = url;
+      }
+    } catch (e) {
+      console.warn('map images unavailable:', e);
+    }
+  }
+
+  function getMapImage(title) {
+    return mapImages[title.toLowerCase()] || '';
+  }
+
+  /* ── WebSocket ── */
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/ws`);
+    ws.onopen    = () => { reconnectDelay = 1000; };
+    ws.onmessage = evt => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === 'poll_update') render(msg.data);
+      } catch {}
+    };
+    ws.onclose = () => {
+      setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    };
+  }
+
+  fetch('/api/poll/state')
+    .then(r => r.json())
+    .then(d => { if (d.phase !== 'idle') render(d); })
+    .catch(() => {});
+
+  /* ── Render ── */
+  function render(state) {
+    if (state.phase === 'idle' || !state.poll_id) {
+      hide();
+      stopTimer();
+      return;
+    }
+
+    show();
+    phaseBadge.textContent = state.phase === 'agent' ? 'AGENT VOTE' : 'MAP VOTE';
+    pollTitle.textContent  = state.title;
+
+    if (state.status === 'completed' || state.status === 'archived') {
+      showWinner(state);
+      return;
+    }
+
+    activeSection.style.display = 'block';
+    winnerPanel.classList.remove('show');
+    clearTimeout(winnerTimeout);
+
+    renderChoices(state.choices);
+    startTimer(state.ends_at);
+  }
+
+  function renderChoices(choices) {
+    const total    = choices.reduce((s, c) => s + c.votes, 0);
+    const maxVotes = choices.reduce((m, c) => Math.max(m, c.votes), 0);
+
+    /* Sorted order: most votes first */
+    const sorted   = [...choices].sort((a, b) => b.votes - a.votes);
+    const stride   = ITEM_HEIGHT + ITEM_GAP;
+
+    totalVotesEl.textContent = `${total} vote${total !== 1 ? 's' : ''}`;
+
+    /* Remove stale nodes */
+    const incoming = new Set(choices.map(c => c.id));
+    for (const id of Object.keys(choiceNodes)) {
+      if (!incoming.has(id)) {
+        choiceNodes[id].remove();
+        delete choiceNodes[id];
+      }
+    }
+
+    /* Add new nodes */
+    for (const ch of choices) {
+      if (!choiceNodes[ch.id]) {
+        const node = buildChoiceNode();
+        choicesContainer.appendChild(node);
+        choiceNodes[ch.id] = node;
+      }
+    }
+
+    /* Resize container */
+    choicesContainer.style.height = (choices.length * stride - ITEM_GAP) + 'px';
+
+    /* Update every node */
+    choices.forEach(ch => {
+      const node       = choiceNodes[ch.id];
+      const sortedIdx  = sorted.findIndex(s => s.id === ch.id);
+      const pct        = total > 0 ? ch.votes / total : 0;
+      const isLeading  = ch.votes === maxVotes && maxVotes > 0;
+
+      /* Position — transition handles the animation */
+      node.style.transform = `translateY(${sortedIdx * stride}px)`;
+
+      /* Bar width (scaleX for GPU) */
+      node.querySelector('.choice-bar').style.transform = `scaleX(${pct})`;
+
+      /* Leading highlight */
+      node.classList.toggle('leading', isLeading);
+
+      /* Text */
+      node.querySelector('.choice-title').textContent  = ch.title;
+      node.querySelector('.choice-votes').textContent  = ch.votes;
+      node.querySelector('.choice-pct').textContent    = Math.round(pct * 100) + '%';
+
+      /* Map image (set once, avoid flicker) */
+      const imgEl  = node.querySelector('.choice-image');
+      const imgUrl = getMapImage(ch.title);
+      if (imgUrl && imgEl.dataset.src !== imgUrl) {
+        imgEl.style.backgroundImage = `url(${imgUrl})`;
+        imgEl.dataset.src = imgUrl;
+      }
+    });
+  }
+
+  function buildChoiceNode() {
+    const div = document.createElement('div');
+    div.className = 'choice';
+    div.innerHTML = `
+      <div class="choice-image"></div>
+      <div class="choice-scrim"></div>
+      <div class="choice-bar"></div>
+      <div class="choice-accent"></div>
+      <div class="choice-content">
+        <span class="choice-title"></span>
+        <span class="choice-right">
+          <span class="choice-votes"></span>
+          <span class="choice-pct"></span>
+        </span>
+      </div>`;
+    return div;
+  }
+
+  function showWinner(state) {
+    stopTimer();
+    clearTimeout(winnerTimeout);
+
+    activeSection.style.display = 'none';
+    winnerPanel.classList.remove('show');
+    void winnerPanel.offsetWidth; /* force reflow to restart animation */
+    winnerPanel.classList.add('show');
+
+    const w = state.winner;
+    if (w) {
+      winnerNameEl.textContent = w.title;
+
+      const imgUrl = getMapImage(w.title);
+      winnerCardImage.style.backgroundImage = imgUrl ? `url(${imgUrl})` : 'none';
+
+      const total = (state.choices || []).reduce((s, c) => s + c.votes, 0);
+      const pct   = total > 0 ? Math.round(w.votes / total * 100) : 0;
+      winnerVotesEl.textContent = `${w.votes} votes · ${pct}%`;
+    } else {
+      winnerNameEl.textContent = '–';
+      winnerVotesEl.textContent = '';
+      winnerCardImage.style.backgroundImage = 'none';
+    }
+
+    winnerTimeout = setTimeout(hide, WINNER_DELAY);
+  }
+
+  /* ── Overlay show / hide ── */
+  function show() {
+    clearTimeout(exitTimeout);
+    overlay.classList.remove('exiting');
+    overlay.classList.add('visible');
+  }
+
+  function hide() {
+    overlay.classList.add('exiting');
+    overlay.classList.remove('visible');
+    exitTimeout = setTimeout(() => overlay.classList.remove('exiting'), 200);
+  }
+
+  /* ── Timer ── */
+  function startTimer(endsAtStr) {
+    stopTimer();
+    if (!endsAtStr) return;
+    const end = new Date(endsAtStr).getTime();
+
+    function tick() {
+      const rem = Math.max(0, Math.floor((end - Date.now()) / 1000));
+      timerEl.textContent = `${pad(Math.floor(rem / 60))}:${pad(rem % 60)}`;
+      timerEl.classList.toggle('ending', rem <= 10);
+      if (rem === 0) stopTimer();
+    }
+    tick();
+    timerInterval = setInterval(tick, 500);
+  }
+
+  function stopTimer() {
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+    timerEl.classList.remove('ending');
+  }
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  /* ── Boot ── */
+  loadMapImages().then(connect);
+})();
+</script>
+</body>
+</html>
