@@ -91,7 +91,7 @@ func (a *PollAPI) CreateMapPoll(excludeNames []string, duration int) error {
 
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("Twitch API %d: %s", resp.StatusCode, b)
+		return fmt.Errorf("twitch API %d: %s", resp.StatusCode, b)
 	}
 
 	log.Printf("pollapi: poll created — maps: %v, duration: %ds", candidates, duration)

@@ -231,10 +231,3 @@ func parseIRCLine(line string) (*ircMessage, bool) {
 		text:    text,
 	}, true
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

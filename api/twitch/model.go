@@ -38,15 +38,15 @@ type wsSubscription struct {
 // Poll event payload
 
 type PollEvent struct {
-	ID                   string       `json:"id"`
-	BroadcasterUserID    string       `json:"broadcaster_user_id"`
-	Title                string       `json:"title"`
-	Choices              []PollChoice `json:"choices"`
-	Status               string       `json:"status"`
-	StartedAt            time.Time    `json:"started_at"`
-	EndsAt               time.Time    `json:"ends_at"`
-	BitsVotingEnabled    bool         `json:"bits_voting_enabled"`
-	ChannelPointsVoting  interface{}  `json:"channel_points_voting"`
+	ID                  string       `json:"id"`
+	BroadcasterUserID   string       `json:"broadcaster_user_id"`
+	Title               string       `json:"title"`
+	Choices             []PollChoice `json:"choices"`
+	Status              string       `json:"status"`
+	StartedAt           time.Time    `json:"started_at"`
+	EndsAt              time.Time    `json:"ends_at"`
+	BitsVotingEnabled   bool         `json:"bits_voting_enabled"`
+	ChannelPointsVoting interface{}  `json:"channel_points_voting"`
 }
 
 type PollChoice struct {
@@ -60,8 +60,8 @@ type PollChoice struct {
 // Subscription create request/response
 
 type subRequest struct {
-	Type      string      `json:"type"`
-	Version   string      `json:"version"`
+	Type      string       `json:"type"`
+	Version   string       `json:"version"`
 	Condition subCondition `json:"condition"`
 	Transport subTransport `json:"transport"`
 }
@@ -73,10 +73,4 @@ type subCondition struct {
 type subTransport struct {
 	Method    string `json:"method"`
 	SessionID string `json:"session_id"`
-}
-
-type subResponse struct {
-	Data []struct {
-		ID string `json:"id"`
-	} `json:"data"`
 }
