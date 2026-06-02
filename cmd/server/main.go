@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,11 +15,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/kudryavtsevmakar/valovoting/api/twitch"
 	"github.com/kudryavtsevmakar/valovoting/internal/config"
+	"github.com/kudryavtsevmakar/valovoting/internal/handler"
 	"github.com/kudryavtsevmakar/valovoting/internal/hub"
 	"github.com/kudryavtsevmakar/valovoting/internal/poll"
 	"github.com/kudryavtsevmakar/valovoting/internal/setup"
-	"github.com/kudryavtsevmakar/valovoting/internal/twitch"
 )
 
 //go:embed static/overlay.html
@@ -66,20 +68,8 @@ func main() {
 	go evClient.Run(ctx)
 	go chatBot.Run(ctx)
 
-	r := gin.New()
-	r.Use(gin.Recovery())
-	r.Use(corsMiddleware())
-
-	r.GET("/api/poll/state", poll.NewHandler(pollService).GetState)
-	r.GET("/ws", h.ServeWS)
-	r.GET("/overlay", func(c *gin.Context) {
-		data, err := staticFiles.ReadFile("static/overlay.html")
-		if err != nil {
-			c.Status(http.StatusInternalServerError)
-			return
-		}
-		c.Data(http.StatusOK, "text/html; charset=utf-8", data)
-	})
+	apiHandler := handler.New(pollService, staticFiles)
+	r := handler.NewRouter(apiHandler, h)
 
 	fmt.Printf("  Оверлей:  http://localhost:%s/overlay\n\n", cfg.Port)
 
@@ -87,7 +77,7 @@ func main() {
 
 	go func() {
 		log.Printf("server: listening on :%s", cfg.Port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("server: %v", err)
 		}
 	}()
@@ -101,17 +91,4 @@ func main() {
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutCancel()
 	_ = srv.Shutdown(shutCtx)
-}
-
-func corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type")
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-		c.Next()
-	}
 }
